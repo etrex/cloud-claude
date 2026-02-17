@@ -1,0 +1,30 @@
+{
+  "name": "cloud-claude",
+  "version": "1.0.0",
+  "description": "把 Claude Code 帶到通訊軟體上，讓你隨時隨地都能操作程式碼。",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/etrex/cloud-claude.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/etrex/cloud-claude/issues"
+  },
+  "homepage": "https://github.com/etrex/cloud-claude#readme",
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.3",
+    "@line/bot-sdk": "^10.6.0",
+    "express": "^5.2.1"
+  }
+}

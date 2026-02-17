@@ -1,0 +1,13 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+# 複製 package.json 和測試檔案
+COPY package.json ./
+COPY test-agent.js ./
+
+# 安裝依賴
+RUN npm install
+
+# 執行測試
+CMD ["node", "test-agent.js"]
