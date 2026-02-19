@@ -46,7 +46,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   // 處理每個 event（非同步，不阻塞回應）
   body.events.forEach((event) => {
     logEvent(event);
-    replyDebug(event);
+    forwardToWorker(event);
   });
 });
 
@@ -77,6 +77,21 @@ function logEvent(event) {
     console.log('  Bot joined a group/room');
   } else if (type === 'leave') {
     console.log('  Bot left a group/room');
+  }
+}
+
+async function forwardToWorker(event) {
+  const workerUrl = process.env.CODESPACE_WORKER_URL;
+  if (!workerUrl) return;
+
+  try {
+    await fetch(`${workerUrl}/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    });
+  } catch (err) {
+    console.error('Forward to worker failed:', err.message);
   }
 }
 
