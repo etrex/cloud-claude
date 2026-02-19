@@ -1,13 +1,17 @@
 'use strict';
 
 const express = require('express');
-const { middleware, validateSignature } = require('@line/bot-sdk');
+const { validateSignature, messagingApi } = require('@line/bot-sdk');
 
 const app = express();
 
 const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET || '',
 };
+
+const lineClient = new messagingApi.MessagingApiClient({
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
+});
 
 // Health check endpoint (Cloud Run 需要)
 app.get('/', (req, res) => {
@@ -36,13 +40,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   console.log('Received LINE webhook:');
   console.log(JSON.stringify(body, null, 2));
 
-  // 處理每個 event
+  // 先回傳 200 OK（LINE 要求在 timeout 前必須回應）
+  res.status(200).json({ received: body.events.length });
+
+  // 處理每個 event（非同步，不阻塞回應）
   body.events.forEach((event) => {
     logEvent(event);
+    replyDebug(event);
   });
-
-  // 回傳 200 OK（LINE 要求在 timeout 前必須回應）
-  res.status(200).json({ received: body.events.length });
 });
 
 function logEvent(event) {
@@ -72,6 +77,21 @@ function logEvent(event) {
     console.log('  Bot joined a group/room');
   } else if (type === 'leave') {
     console.log('  Bot left a group/room');
+  }
+}
+
+async function replyDebug(event) {
+  if (!event.replyToken) return;
+
+  const debugText = JSON.stringify(event, null, 2);
+
+  try {
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: debugText }],
+    });
+  } catch (err) {
+    console.error('Reply failed:', err.message);
   }
 }
 
