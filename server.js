@@ -63,7 +63,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    'bash', '-lc', `claude -p ${shellEscape(text)}`,
+    `/home/codespace/nvm/current/bin/claude -p ${shellEscape(text)}`,
   ]);
 
   let stdout = '';
