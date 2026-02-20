@@ -49,6 +49,7 @@ function runOnCodespace(event) {
   if (event.type !== 'message' || event.message.type !== 'text') return;
 
   const userId = event.source.userId;
+  const replyToken = event.replyToken;
   const text = event.message.text;
   const codespaceName = process.env.CODESPACE_NAME;
 
@@ -85,13 +86,19 @@ function runOnCodespace(event) {
     const response = stdout.trim();
     console.log(`[codespace] response length: ${response.length}`);
 
+    const messages = [{ type: 'text', text: response || '（無回應）' }];
+
     try {
-      await lineClient.pushMessage({
-        to: userId,
-        messages: [{ type: 'text', text: response || '（無回應）' }],
-      });
-    } catch (err) {
-      console.error('[codespace] push failed:', err.message);
+      await lineClient.replyMessage({ replyToken, messages });
+      console.log('[codespace] replied via reply API');
+    } catch (replyErr) {
+      console.warn('[codespace] reply failed, fallback to push:', replyErr.message);
+      try {
+        await lineClient.pushMessage({ to: userId, messages });
+        console.log('[codespace] replied via push API');
+      } catch (pushErr) {
+        console.error('[codespace] push failed:', pushErr.message);
+      }
     }
   });
 }
