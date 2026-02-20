@@ -25,16 +25,18 @@ if [ -f "$SESSIONS_FILE" ]; then
   SESSION_ID=$(jq -r --arg uid "$USER_ID" '.[$uid] // empty' "$SESSIONS_FILE" 2>/dev/null)
 fi
 
+SYSTEM_PROMPT="你是一個 LINE Bot 助手。請用純文字回覆，不要使用任何 Markdown 語法（不要用 **粗體**、## 標題、\`程式碼\`、--- 分隔線等）。回覆要簡潔易讀。"
+
 # 呼叫 claude，有 session 就 resume，失敗則建新 session
 if [ -n "$SESSION_ID" ]; then
-  OUTPUT=$("$CLAUDE" -p "$PROMPT" --resume "$SESSION_ID" --output-format json 2>/dev/null)
+  OUTPUT=$("$CLAUDE" -p "$PROMPT" --resume "$SESSION_ID" --output-format json --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
   # resume 失敗（輸出空）則清掉舊 session，重新開始
   if [ -z "$OUTPUT" ]; then
     SESSION_ID=""
-    OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json 2>/dev/null)
+    OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
   fi
 else
-  OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json 2>/dev/null)
+  OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" 2>/dev/null)
 fi
 
 # 儲存新的 session ID
