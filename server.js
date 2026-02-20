@@ -59,11 +59,12 @@ function runOnCodespace(event) {
 
   console.log(`[codespace] userId=${userId} text=${text}`);
 
+  const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const child = spawn('gh', [
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `/home/codespace/nvm/current/bin/claude -p ${shellEscape(text)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /home/codespace/nvm/current/bin/claude -p ${shellEscape(text)}`,
   ]);
 
   let stdout = '';
