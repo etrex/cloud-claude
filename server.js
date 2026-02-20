@@ -75,6 +75,11 @@ function runOnCodespace(event) {
   const allowWrite = isAllowed(event) ? '1' : '0';
   console.log(`[codespace] userId=${userId} allowWrite=${allowWrite} text=${text}`);
 
+  // 顯示 loading 動畫（僅限 1 對 1 聊天）
+  if (event.source.type === 'user') {
+    lineClient.showLoadingAnimation({ chatId: userId, loadingSeconds: 60 }).catch(() => {});
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const child = spawn('gh', [
     'codespace', 'ssh',
