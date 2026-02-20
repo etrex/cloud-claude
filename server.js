@@ -65,7 +65,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /home/codespace/nvm/current/bin/claude -p ${shellEscape(text)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(text)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
