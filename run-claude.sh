@@ -6,24 +6,15 @@ TEXT="$3"
 QUOTED_ID="$4"
 
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
-HISTORY_FILE="/workspaces/cloud-claude/.message-history.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
-# 儲存當前訊息到歷史記錄
-HISTORY="{}"
-if [ -f "$HISTORY_FILE" ]; then
-  HISTORY=$(cat "$HISTORY_FILE")
-fi
-echo "$HISTORY" | jq --arg mid "$MESSAGE_ID" --arg txt "$TEXT" '.[$mid] = $txt' > "$HISTORY_FILE"
-
-# 組建完整 prompt（有引用時加上被引用的訊息）
-PROMPT="$TEXT"
+# 組建 prompt，帶上 messageId 和 quotedMessageId（如果有）
 if [ -n "$QUOTED_ID" ]; then
-  QUOTED_TEXT=$(jq -r --arg mid "$QUOTED_ID" '.[$mid] // empty' "$HISTORY_FILE" 2>/dev/null)
-  if [ -n "$QUOTED_TEXT" ]; then
-    PROMPT="[引用訊息: \"$QUOTED_TEXT\"]
+  PROMPT="[messageId: $MESSAGE_ID, quotedMessageId: $QUOTED_ID]
 $TEXT"
-  fi
+else
+  PROMPT="[messageId: $MESSAGE_ID]
+$TEXT"
 fi
 
 # 讀取此 userId 的 session ID
