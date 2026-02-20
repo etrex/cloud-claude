@@ -65,12 +65,16 @@ function runOnCodespace(event) {
     '-c', codespaceName,
     '--',
     `ANTHROPIC_API_KEY=${apiKey} /home/codespace/nvm/current/bin/claude -p ${shellEscape(text)}`,
-  ]);
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (d) => { stdout += d; });
   child.stderr.on('data', (d) => { stderr += d; });
+
+  child.on('error', (err) => {
+    console.error('[codespace] spawn error:', err.message);
+  });
 
   child.on('close', async (code) => {
     console.log(`[codespace] exit code: ${code}`);
