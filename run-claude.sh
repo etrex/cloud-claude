@@ -10,8 +10,15 @@ MSG_TYPE="${6:-text}"
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
-# 載入環境變數（SSH 不會自動 source login shell，需手動 source）
-source ~/.bash_profile 2>/dev/null || source ~/.profile 2>/dev/null || true
+# 載入 Codespace secrets（非 login shell 不會自動注入）
+SECRETS_FILE="/workspaces/.codespaces/shared/.env-secrets"
+if [ -f "$SECRETS_FILE" ]; then
+  while IFS= read -r line; do
+    key=$(echo "$line" | sed "s/=.*//")
+    value=$(echo "$line" | sed "s/$key=//1")
+    export "$key=$(echo "$value" | base64 -d)"
+  done < "$SECRETS_FILE"
+fi
 
 cd /workspaces/cloud-claude
 
