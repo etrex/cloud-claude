@@ -40,3 +40,5 @@ CloudClaude 透過通訊軟體作為介面，讓你在任何設備上都能延�
 ## License
 
 MIT
+
+<!-- updated: 2026-02-20 -->
