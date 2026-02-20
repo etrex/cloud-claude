@@ -75,9 +75,14 @@ function runOnCodespace(event) {
   const allowWrite = isAllowed(event) ? '1' : '0';
   console.log(`[codespace] userId=${userId} allowWrite=${allowWrite} text=${text}`);
 
-  // 顯示 loading 動畫（僅限 1 對 1 聊天）
+  // 顯示 loading 動畫並持續更新直到回應完成（僅限 1 對 1 聊天）
+  let loadingInterval = null;
   if (event.source.type === 'user') {
-    lineClient.showLoadingAnimation({ chatId: userId, loadingSeconds: 60 }).catch(() => {});
+    const keepLoading = () => {
+      lineClient.showLoadingAnimation({ chatId: userId, loadingSeconds: 60 }).catch(() => {});
+    };
+    keepLoading();
+    loadingInterval = setInterval(keepLoading, 55000);
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
@@ -98,6 +103,7 @@ function runOnCodespace(event) {
   });
 
   child.on('close', async (code) => {
+    if (loadingInterval) clearInterval(loadingInterval);
     console.log(`[codespace] exit code: ${code}`);
     if (stderr) console.log(`[codespace] stderr: ${stderr}`);
 
