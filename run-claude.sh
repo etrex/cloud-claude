@@ -10,8 +10,8 @@ MSG_TYPE="${6:-text}"
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
-# 載入環境變數（SSH 不會自動 source .bashrc）
-source ~/.bashrc 2>/dev/null || true
+# 載入環境變數（SSH 不會自動 source login shell，需手動 source）
+source ~/.bash_profile 2>/dev/null || source ~/.profile 2>/dev/null || true
 
 cd /workspaces/cloud-claude
 
