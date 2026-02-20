@@ -50,7 +50,9 @@ function runOnCodespace(event) {
 
   const userId = event.source.userId;
   const replyToken = event.replyToken;
+  const messageId = event.message.id;
   const text = event.message.text;
+  const quotedMessageId = event.message.quotedMessageId || '';
   const codespaceName = process.env.CODESPACE_NAME;
 
   if (!codespaceName) {
@@ -65,7 +67,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(text)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
