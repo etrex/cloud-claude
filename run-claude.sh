@@ -5,14 +5,32 @@ MESSAGE_ID="$2"
 TEXT="$3"
 QUOTED_ID="$4"
 ALLOW_WRITE="$5"
+MSG_TYPE="${6:-text}"
 
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
+# 載入環境變數（SSH 不會自動 source .bashrc）
+source ~/.bashrc 2>/dev/null || true
+
 cd /workspaces/cloud-claude
 
+# 若為圖片，先下載到暫存檔
+IMAGE_PATH=""
+if [ "$MSG_TYPE" = "image" ]; then
+  IMAGE_PATH="/tmp/img_${MESSAGE_ID}.jpg"
+  curl -s -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
+    "https://api-data.line.me/v2/bot/message/${MESSAGE_ID}/content" \
+    -o "$IMAGE_PATH"
+fi
+
 # 組建 prompt，帶上 messageId 和 quotedMessageId（如果有）
-if [ -n "$QUOTED_ID" ]; then
+if [ "$MSG_TYPE" = "image" ]; then
+  BASE="[messageId: $MESSAGE_ID${QUOTED_ID:+, quotedMessageId: $QUOTED_ID}]
+使用者傳送了一張圖片，路徑: $IMAGE_PATH"
+  PROMPT="$BASE${TEXT:+
+$TEXT}"
+elif [ -n "$QUOTED_ID" ]; then
   PROMPT="[messageId: $MESSAGE_ID, quotedMessageId: $QUOTED_ID]
 $TEXT"
 else

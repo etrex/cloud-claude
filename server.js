@@ -58,12 +58,14 @@ function isAllowed(event) {
 }
 
 function runOnCodespace(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') return;
+  if (event.type !== 'message') return;
+  const msgType = event.message.type;
+  if (msgType !== 'text' && msgType !== 'image') return;
 
   const userId = event.source.userId;
   const replyToken = event.replyToken;
   const messageId = event.message.id;
-  const text = event.message.text;
+  const text = msgType === 'text' ? event.message.text : '';
   const quotedMessageId = event.message.quotedMessageId || '';
   const codespaceName = process.env.CODESPACE_NAME;
 
@@ -90,7 +92,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
