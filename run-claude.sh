@@ -8,6 +8,8 @@ QUOTED_ID="$4"
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
+cd /workspaces/cloud-claude
+
 # 組建 prompt，帶上 messageId 和 quotedMessageId（如果有）
 if [ -n "$QUOTED_ID" ]; then
   PROMPT="[messageId: $MESSAGE_ID, quotedMessageId: $QUOTED_ID]
