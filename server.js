@@ -45,6 +45,18 @@ function shellEscape(str) {
   return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
+const allowedIds = new Set(
+  (process.env.ALLOWED_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+);
+
+function isAllowed(event) {
+  const src = event.source;
+  if (src.groupId && allowedIds.has(src.groupId)) return true;
+  if (src.roomId && allowedIds.has(src.roomId)) return true;
+  if (src.userId && allowedIds.has(src.userId)) return true;
+  return false;
+}
+
 function runOnCodespace(event) {
   if (event.type !== 'message' || event.message.type !== 'text') return;
 
@@ -60,14 +72,15 @@ function runOnCodespace(event) {
     return;
   }
 
-  console.log(`[codespace] userId=${userId} text=${text}`);
+  const allowWrite = isAllowed(event) ? '1' : '0';
+  console.log(`[codespace] userId=${userId} allowWrite=${allowWrite} text=${text}`);
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const child = spawn('gh', [
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
