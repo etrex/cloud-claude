@@ -7,6 +7,7 @@ QUOTED_ID="$4"
 ALLOW_WRITE="$5"
 MSG_TYPE="${6:-text}"
 CHAT_ID="${7:-$USER_ID}"
+REPLY_TOKEN="$8"
 
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
@@ -72,10 +73,14 @@ fi
 QUEUE_FILE="/tmp/queue_${USER_ID}"
 LAST_MSG_FILE="/tmp/queue_last_${USER_ID}"
 PID_FILE="/tmp/queue_pid_${USER_ID}"
+TOKEN_QUEUE_FILE="/tmp/reply_tokens_${CHAT_ID}"
 
 # 將 prompt 以 null byte 分隔追加到佇列
 printf '%s\0' "$PROMPT" >> "$QUEUE_FILE"
 date +%s > "$LAST_MSG_FILE"
+
+# 將 replyToken 推入 queue（一行一個，最舊在最上面）
+[ -n "$REPLY_TOKEN" ] && echo "$REPLY_TOKEN" >> "$TOKEN_QUEUE_FILE"
 
 # 若背景處理程序已在執行，直接退出
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -138,27 +143,60 @@ $STDERR_OUTPUT}"
     fi
   fi
 
-  # 透過 LINE Push API 發送（分段，最多 5 則）
-  python3 - <<PYEOF
+  # 回覆：先試 reply token queue，全部失敗才用 Push API
+  echo "$RESPONSE" | python3 - "$CHAT_ID" "$TOKEN_QUEUE_FILE" <<PYEOF
 import sys, json, os, urllib.request
 
-user_id = "$CHAT_ID"
+chat_id = sys.argv[1]
+token_queue_file = sys.argv[2]
 token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-text = """$RESPONSE"""
+text = sys.stdin.read()
 
 chunks = [text[i:i+2000] for i in range(0, len(text), 2000)][:5]
 messages = [{"type": "text", "text": c} for c in chunks]
-data = json.dumps({"to": user_id, "messages": messages}).encode()
-req = urllib.request.Request(
-  "https://api.line.me/v2/bot/message/push",
-  data=data,
-  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-  method="POST"
-)
+
+def call_api(url, body):
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        urllib.request.urlopen(req)
+        return True
+    except Exception:
+        return False
+
+# 試 reply token queue（從最舊開始）
+replied = False
+remaining_tokens = []
 try:
-  urllib.request.urlopen(req)
-except Exception as e:
-  print(f"Push failed: {e}", file=sys.stderr)
+    with open(token_queue_file) as f:
+        tokens = [l.strip() for l in f if l.strip()]
+except FileNotFoundError:
+    tokens = []
+
+for i, reply_token in enumerate(tokens):
+    if not replied and call_api(
+        "https://api.line.me/v2/bot/message/reply",
+        {"replyToken": reply_token, "messages": messages}
+    ):
+        replied = True
+        remaining_tokens = tokens[i+1:]  # 保留未使用的 token
+        break
+
+if replied:
+    # 寫回剩餘未使用的 token
+    with open(token_queue_file, "w") as f:
+        f.write("\n".join(remaining_tokens) + ("\n" if remaining_tokens else ""))
+else:
+    # 清空已過期的 token，改用 Push API
+    open(token_queue_file, "w").close()
+    call_api(
+        "https://api.line.me/v2/bot/message/push",
+        {"to": chat_id, "messages": messages}
+    )
 PYEOF
 ) &
 echo $! > "$PID_FILE"
