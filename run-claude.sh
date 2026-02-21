@@ -144,13 +144,20 @@ $STDERR_OUTPUT}"
   fi
 
   # 回覆：先試 reply token queue，全部失敗才用 Push API
-  echo "$RESPONSE" | python3 - "$CHAT_ID" "$TOKEN_QUEUE_FILE" <<PYEOF
+  CLAUDE_RESPONSE="$RESPONSE" python3 - "$CHAT_ID" "$TOKEN_QUEUE_FILE" <<PYEOF
 import sys, json, os, urllib.request
+from datetime import datetime
+
+LOG = "/workspaces/cloud-claude/processor.log"
+def log(msg):
+    with open(LOG, "a") as f:
+        f.write(f"[{datetime.now().isoformat()}] {msg}\n")
 
 chat_id = sys.argv[1]
 token_queue_file = sys.argv[2]
 token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-text = sys.stdin.read()
+text = os.environ.get("CLAUDE_RESPONSE", "")
+log(f"chat_id={chat_id} text_len={len(text)}")
 
 chunks = [text[i:i+2000] for i in range(0, len(text), 2000)][:5]
 messages = [{"type": "text", "text": c} for c in chunks]
@@ -164,8 +171,10 @@ def call_api(url, body):
     )
     try:
         urllib.request.urlopen(req)
+        log(f"OK {url}")
         return True
-    except Exception:
+    except Exception as e:
+        log(f"FAIL {url}: {e}")
         return False
 
 def pop_token(path):
