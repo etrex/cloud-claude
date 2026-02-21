@@ -168,31 +168,32 @@ def call_api(url, body):
     except Exception:
         return False
 
-# 試 reply token queue（從最舊開始）
-replied = False
-remaining_tokens = []
-try:
-    with open(token_queue_file) as f:
-        tokens = [l.strip() for l in f if l.strip()]
-except FileNotFoundError:
-    tokens = []
+def pop_token(path):
+    """讀取並刪除檔案第一行，回傳該行內容；無內容則回傳 None"""
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+        if not lines:
+            return None
+        token = lines[0].strip()
+        with open(path, "w") as f:
+            f.writelines(lines[1:])
+        return token or None
+    except FileNotFoundError:
+        return None
 
-for i, reply_token in enumerate(tokens):
-    if not replied and call_api(
+# 逐一 pop token 試 Reply API，全部失敗才用 Push API
+replied = False
+while not replied:
+    reply_token = pop_token(token_queue_file)
+    if reply_token is None:
+        break
+    replied = call_api(
         "https://api.line.me/v2/bot/message/reply",
         {"replyToken": reply_token, "messages": messages}
-    ):
-        replied = True
-        remaining_tokens = tokens[i+1:]  # 保留未使用的 token
-        break
+    )
 
-if replied:
-    # 寫回剩餘未使用的 token
-    with open(token_queue_file, "w") as f:
-        f.write("\n".join(remaining_tokens) + ("\n" if remaining_tokens else ""))
-else:
-    # 清空已過期的 token，改用 Push API
-    open(token_queue_file, "w").close()
+if not replied:
     call_api(
         "https://api.line.me/v2/bot/message/push",
         {"to": chat_id, "messages": messages}
