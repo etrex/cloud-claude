@@ -112,7 +112,12 @@ function runOnCodespace(event) {
     if (code !== 0) return;
 
     const response = stdout.trim();
-    console.log(`[codespace] response length: ${response.length}`);
+    console.log(`[codespace] response: ${response.slice(0, 80)}`);
+
+    if (response === '__QUEUED__') {
+      console.log('[codespace] message queued, no reply sent');
+      return;
+    }
 
     const chunks = [];
     const CHUNK_SIZE = 2000;

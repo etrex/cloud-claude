@@ -51,7 +51,7 @@ if [ -f "$SESSIONS_FILE" ]; then
   SESSION_ID=$(jq -r --arg uid "$USER_ID" '.[$uid] // empty' "$SESSIONS_FILE" 2>/dev/null)
 fi
 
-# 若使用者傳送 reset，清除 session 並回覆確認
+# 若使用者傳送 reset，清除 session 並立即回覆（不進佇列）
 if [ "$TEXT" = "reset" ]; then
   if [ -f "$SESSIONS_FILE" ] && [ -n "$SESSION_ID" ]; then
     jq --arg uid "$USER_ID" 'del(.[$uid])' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
@@ -62,47 +62,105 @@ fi
 
 SYSTEM_PROMPT="你是一個 LINE Bot 助手。請用純文字回覆，不要使用任何 Markdown 語法（不要用 **粗體**、## 標題、\`程式碼\`、--- 分隔線等）。回覆要簡潔易讀。"
 
-# 根據是否在白名單決定是否加上 --dangerously-skip-permissions
 EXTRA_FLAGS=""
 if [ "$ALLOW_WRITE" = "1" ]; then
   EXTRA_FLAGS="--dangerously-skip-permissions"
 fi
 
-# 呼叫 claude，有 session 就 resume，失敗則建新 session
-STDERR_FILE=$(mktemp)
-if [ -n "$SESSION_ID" ]; then
-  OUTPUT=$("$CLAUDE" -p "$PROMPT" --resume "$SESSION_ID" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
-  # resume 失敗（輸出空）則清掉舊 session，重新開始
-  if [ -z "$OUTPUT" ]; then
-    SESSION_ID=""
-    OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
-  fi
-else
-  OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
-fi
-STDERR_OUTPUT=$(cat "$STDERR_FILE")
-rm -f "$STDERR_FILE"
+# ===== 訊息佇列（30 秒 sliding window）=====
+QUEUE_FILE="/tmp/queue_${USER_ID}"
+LAST_MSG_FILE="/tmp/queue_last_${USER_ID}"
+PID_FILE="/tmp/queue_pid_${USER_ID}"
 
-# 若有錯誤，保留 session 不動，直接輸出 debug 訊息給用戶
-IS_ERROR=$(echo "$OUTPUT" | jq -r '.is_error // false' 2>/dev/null)
-if [ "$IS_ERROR" = "true" ]; then
-  ERROR_RESULT=$(echo "$OUTPUT" | jq -r '.result // "unknown error"' 2>/dev/null)
-  echo "[ERROR] session=$SESSION_ID msg=$MESSAGE_ID type=$MSG_TYPE
-$ERROR_RESULT${STDERR_OUTPUT:+
---- stderr ---
-$STDERR_OUTPUT}"
+# 將 prompt 以 null byte 分隔追加到佇列
+printf '%s\0' "$PROMPT" >> "$QUEUE_FILE"
+date +%s > "$LAST_MSG_FILE"
+
+# 若背景處理程序已在執行，直接退出
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "__QUEUED__"
   exit 0
 fi
 
-# 儲存新的 session ID
-NEW_SESSION_ID=$(echo "$OUTPUT" | jq -r '.session_id // empty' 2>/dev/null)
-if [ -n "$NEW_SESSION_ID" ]; then
-  EXISTING="{}"
-  if [ -f "$SESSIONS_FILE" ]; then
-    EXISTING=$(cat "$SESSIONS_FILE")
-  fi
-  echo "$EXISTING" | jq --arg uid "$USER_ID" --arg sid "$NEW_SESSION_ID" '.[$uid] = $sid' > "$SESSIONS_FILE"
-fi
+# 啟動背景批次處理程序
+(
+  # 等待 30 秒內無新訊息（sliding window，每 5 秒檢查一次）
+  while true; do
+    sleep 5
+    LAST=$(cat "$LAST_MSG_FILE" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    if [ $((NOW - LAST)) -ge 30 ]; then
+      break
+    fi
+  done
 
-# 輸出回應文字
-echo "$OUTPUT" | jq -r '.result // "（無回應）"'
+  # 讀取並清空佇列
+  COMBINED_PROMPT=$(tr '\0' '\n' < "$QUEUE_FILE" 2>/dev/null)
+  rm -f "$QUEUE_FILE" "$LAST_MSG_FILE" "$PID_FILE"
+
+  [ -z "$COMBINED_PROMPT" ] && exit 0
+
+  # 重新讀取 session（等待期間可能已更新）
+  CURR_SESSION=$(jq -r --arg uid "$USER_ID" '.[$uid] // empty' "$SESSIONS_FILE" 2>/dev/null)
+
+  # 呼叫 Claude
+  STDERR_FILE=$(mktemp)
+  OUTPUT=""
+  if [ -n "$CURR_SESSION" ]; then
+    OUTPUT=$("$CLAUDE" -p "$COMBINED_PROMPT" --resume "$CURR_SESSION" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
+    if [ -z "$OUTPUT" ]; then
+      CURR_SESSION=""
+      OUTPUT=$("$CLAUDE" -p "$COMBINED_PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
+    fi
+  else
+    OUTPUT=$("$CLAUDE" -p "$COMBINED_PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>"$STDERR_FILE")
+  fi
+  STDERR_OUTPUT=$(cat "$STDERR_FILE")
+  rm -f "$STDERR_FILE"
+
+  # 處理錯誤
+  IS_ERROR=$(echo "$OUTPUT" | jq -r '.is_error // false' 2>/dev/null)
+  if [ "$IS_ERROR" = "true" ]; then
+    ERROR_RESULT=$(echo "$OUTPUT" | jq -r '.result // "unknown error"' 2>/dev/null)
+    RESPONSE="[ERROR] session=$CURR_SESSION msg=$MESSAGE_ID type=$MSG_TYPE
+$ERROR_RESULT${STDERR_OUTPUT:+
+--- stderr ---
+$STDERR_OUTPUT}"
+  else
+    RESPONSE=$(echo "$OUTPUT" | jq -r '.result // "（無回應）"' 2>/dev/null)
+    # 儲存 session
+    NEW_SESSION_ID=$(echo "$OUTPUT" | jq -r '.session_id // empty' 2>/dev/null)
+    if [ -n "$NEW_SESSION_ID" ]; then
+      EXISTING="{}"
+      [ -f "$SESSIONS_FILE" ] && EXISTING=$(cat "$SESSIONS_FILE")
+      echo "$EXISTING" | jq --arg uid "$USER_ID" --arg sid "$NEW_SESSION_ID" '.[$uid] = $sid' > "$SESSIONS_FILE"
+    fi
+  fi
+
+  # 透過 LINE Push API 發送（分段，最多 5 則）
+  python3 - <<PYEOF
+import sys, json, os, urllib.request
+
+user_id = "$USER_ID"
+token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+text = """$RESPONSE"""
+
+chunks = [text[i:i+2000] for i in range(0, len(text), 2000)][:5]
+messages = [{"type": "text", "text": c} for c in chunks]
+data = json.dumps({"to": user_id, "messages": messages}).encode()
+req = urllib.request.Request(
+  "https://api.line.me/v2/bot/message/push",
+  data=data,
+  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+  method="POST"
+)
+try:
+  urllib.request.urlopen(req)
+except Exception as e:
+  print(f"Push failed: {e}", file=sys.stderr)
+PYEOF
+) &
+echo $! > "$PID_FILE"
+
+echo "__QUEUED__"
+exit 0
