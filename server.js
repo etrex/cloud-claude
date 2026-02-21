@@ -72,39 +72,7 @@ function enqueueEvent(event) {
 function flushBuffer(chatId, events) {
   if (events.length === 0) return;
   console.log(`[debounce] chatId=${chatId} flushing ${events.length} event(s)`);
-
-  // 按順序保存所有 reply tokens（第一個最早過期，優先使用）
-  const allReplyTokens = events.map(e => e.replyToken).filter(Boolean);
-  console.log(`[debounce] collected ${allReplyTokens.length} reply token(s)`);
-
-  // 以第一個 event 為基礎（其 reply token 最早過期，應優先使用）
-  const firstEvent = events[0];
-
-  // 完整合併所有文字訊息（按傳送順序）
-  const combinedText = events
-    .filter(e => e.message.type === 'text')
-    .map(e => e.message.text)
-    .join('\n');
-
-  // 圖片：依傳送順序取第一張
-  const imageEvent = events.find(e => e.message.type === 'image');
-  const primaryMsgType = imageEvent ? 'image' : 'text';
-  const primaryMessageId = imageEvent ? imageEvent.message.id : firstEvent.message.id;
-
-  const mergedEvent = {
-    ...firstEvent,
-    replyToken: allReplyTokens[0],
-    _allReplyTokens: allReplyTokens,
-    message: {
-      ...firstEvent.message,
-      type: primaryMsgType,
-      id: primaryMessageId,
-      text: combinedText,
-      quotedMessageId: firstEvent.message.quotedMessageId || '',
-    },
-  };
-
-  runOnCodespace(mergedEvent);
+  runOnCodespace(events);
 }
 
 function shellEscape(str) {
@@ -123,31 +91,44 @@ function isAllowed(event) {
   return false;
 }
 
-function runOnCodespace(event) {
-  if (event.type !== 'message') return;
-  const msgType = event.message.type;
-  if (msgType !== 'text' && msgType !== 'image') return;
+function runOnCodespace(events) {
+  // 過濾只保留 text 和 image 訊息
+  events = events.filter(e => e.type === 'message' && (e.message.type === 'text' || e.message.type === 'image'));
+  if (events.length === 0) return;
 
-  const userId = event.source.userId;
-  const allReplyTokens = event._allReplyTokens || [event.replyToken].filter(Boolean);
-  const messageId = event.message.id;
-  const text = msgType === 'text' ? event.message.text : '';
-  const quotedMessageId = event.message.quotedMessageId || '';
+  // 從第一個 event 取得 source 資訊（同一 chatId 的 events source 相同）
+  const firstEvent = events[0];
+  const userId = firstEvent.source.userId;
+  const src = firstEvent.source;
+  const chatId = src.groupId || src.roomId || src.userId;
+  const allowWrite = isAllowed(firstEvent) ? '1' : '0';
+
+  // 按順序收集所有 reply tokens（第一個最早過期，優先使用）
+  const allReplyTokens = events.map(e => e.replyToken).filter(Boolean);
+
+  // 完整合併所有文字訊息（按傳送順序）
+  const combinedText = events
+    .filter(e => e.message.type === 'text')
+    .map(e => e.message.text)
+    .join('\n');
+
+  // 圖片：依傳送順序取第一張
+  const imageEvent = events.find(e => e.message.type === 'image');
+  const msgType = imageEvent ? 'image' : 'text';
+  const messageId = imageEvent ? imageEvent.message.id : firstEvent.message.id;
+  const quotedMessageId = firstEvent.message.quotedMessageId || '';
+
   const codespaceName = process.env.CODESPACE_NAME;
-
   if (!codespaceName) {
     console.error('CODESPACE_NAME not set');
     return;
   }
 
-  const allowWrite = isAllowed(event) ? '1' : '0';
-  const src = event.source;
-  const chatId = src.groupId || src.roomId || src.userId;
-  console.log(`[codespace] userId=${userId} chatId=${chatId} allowWrite=${allowWrite} text=${text}`);
+  console.log(`[codespace] userId=${userId} chatId=${chatId} allowWrite=${allowWrite} events=${events.length} text=${combinedText.slice(0, 50)}`);
 
   // 顯示 loading 動畫並持續更新直到回應完成（僅限 1 對 1 聊天）
   let loadingInterval = null;
-  if (event.source.type === 'user') {
+  if (firstEvent.source.type === 'user') {
     const keepLoading = () => {
       lineClient.showLoadingAnimation({ chatId: userId, loadingSeconds: 60 }).catch(() => {});
     };
@@ -161,7 +142,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(firstReplyToken)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(combinedText)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(firstReplyToken)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
