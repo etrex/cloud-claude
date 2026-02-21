@@ -75,7 +75,9 @@ function runOnCodespace(event) {
   }
 
   const allowWrite = isAllowed(event) ? '1' : '0';
-  console.log(`[codespace] userId=${userId} allowWrite=${allowWrite} text=${text}`);
+  const src = event.source;
+  const chatId = src.groupId || src.roomId || src.userId;
+  console.log(`[codespace] userId=${userId} chatId=${chatId} allowWrite=${allowWrite} text=${text}`);
 
   // 顯示 loading 動畫並持續更新直到回應完成（僅限 1 對 1 聊天）
   let loadingInterval = null;
@@ -92,7 +94,7 @@ function runOnCodespace(event) {
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';

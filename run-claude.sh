@@ -6,6 +6,7 @@ TEXT="$3"
 QUOTED_ID="$4"
 ALLOW_WRITE="$5"
 MSG_TYPE="${6:-text}"
+CHAT_ID="${7:-$USER_ID}"
 
 SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
@@ -141,7 +142,7 @@ $STDERR_OUTPUT}"
   python3 - <<PYEOF
 import sys, json, os, urllib.request
 
-user_id = "$USER_ID"
+user_id = "$CHAT_ID"
 token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 text = """$RESPONSE"""
 
