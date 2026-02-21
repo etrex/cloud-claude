@@ -37,9 +37,43 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   res.status(200).json({ received: body.events.length });
 
   body.events.forEach((event) => {
-    runOnCodespace(event);
+    enqueueEvent(event);
   });
 });
+
+// 訊息緩衝區：chatId -> { events: [], timer: null }
+const messageBuffers = new Map();
+const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '3000', 10);
+
+function enqueueEvent(event) {
+  if (event.type !== 'message') return;
+  const msgType = event.message.type;
+  if (msgType !== 'text' && msgType !== 'image') return;
+
+  const src = event.source;
+  const chatId = src.groupId || src.roomId || src.userId;
+
+  if (!messageBuffers.has(chatId)) {
+    messageBuffers.set(chatId, { events: [], timer: null });
+  }
+
+  const buffer = messageBuffers.get(chatId);
+  buffer.events.push(event);
+  console.log(`[debounce] chatId=${chatId} buffered ${buffer.events.length} event(s)`);
+
+  if (buffer.timer) clearTimeout(buffer.timer);
+  buffer.timer = setTimeout(() => {
+    const events = buffer.events;
+    messageBuffers.delete(chatId);
+    flushBuffer(chatId, events);
+  }, DEBOUNCE_MS);
+}
+
+function flushBuffer(chatId, events) {
+  if (events.length === 0) return;
+  console.log(`[debounce] chatId=${chatId} flushing ${events.length} event(s)`);
+  runOnCodespace(events);
+}
 
 function shellEscape(str) {
   return "'" + str.replace(/'/g, "'\\''") + "'";
@@ -57,31 +91,44 @@ function isAllowed(event) {
   return false;
 }
 
-function runOnCodespace(event) {
-  if (event.type !== 'message') return;
-  const msgType = event.message.type;
-  if (msgType !== 'text' && msgType !== 'image') return;
+function runOnCodespace(events) {
+  // 過濾只保留 text 和 image 訊息
+  events = events.filter(e => e.type === 'message' && (e.message.type === 'text' || e.message.type === 'image'));
+  if (events.length === 0) return;
 
-  const userId = event.source.userId;
-  const replyToken = event.replyToken;
-  const messageId = event.message.id;
-  const text = msgType === 'text' ? event.message.text : '';
-  const quotedMessageId = event.message.quotedMessageId || '';
+  // 從第一個 event 取得 source 資訊（同一 chatId 的 events source 相同）
+  const firstEvent = events[0];
+  const userId = firstEvent.source.userId;
+  const src = firstEvent.source;
+  const chatId = src.groupId || src.roomId || src.userId;
+  const allowWrite = isAllowed(firstEvent) ? '1' : '0';
+
+  // 按順序收集所有 reply tokens（第一個最早過期，優先使用）
+  const allReplyTokens = events.map(e => e.replyToken).filter(Boolean);
+
+  // 完整合併所有文字訊息（按傳送順序）
+  const combinedText = events
+    .filter(e => e.message.type === 'text')
+    .map(e => e.message.text)
+    .join('\n');
+
+  // 圖片：依傳送順序取第一張
+  const imageEvent = events.find(e => e.message.type === 'image');
+  const msgType = imageEvent ? 'image' : 'text';
+  const messageId = imageEvent ? imageEvent.message.id : firstEvent.message.id;
+  const quotedMessageId = firstEvent.message.quotedMessageId || '';
+
   const codespaceName = process.env.CODESPACE_NAME;
-
   if (!codespaceName) {
     console.error('CODESPACE_NAME not set');
     return;
   }
 
-  const allowWrite = isAllowed(event) ? '1' : '0';
-  const src = event.source;
-  const chatId = src.groupId || src.roomId || src.userId;
-  console.log(`[codespace] userId=${userId} chatId=${chatId} allowWrite=${allowWrite} text=${text}`);
+  console.log(`[codespace] userId=${userId} chatId=${chatId} allowWrite=${allowWrite} events=${events.length} text=${combinedText.slice(0, 50)}`);
 
   // 顯示 loading 動畫並持續更新直到回應完成（僅限 1 對 1 聊天）
   let loadingInterval = null;
-  if (event.source.type === 'user') {
+  if (firstEvent.source.type === 'user') {
     const keepLoading = () => {
       lineClient.showLoadingAnimation({ chatId: userId, loadingSeconds: 60 }).catch(() => {});
     };
@@ -90,11 +137,12 @@ function runOnCodespace(event) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const firstReplyToken = allReplyTokens[0] || '';
   const child = spawn('gh', [
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(replyToken)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(combinedText)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(firstReplyToken)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
@@ -129,14 +177,22 @@ function runOnCodespace(event) {
     }
     const messages = (chunks.length > 0 ? chunks : ['（無回應）']).map(t => ({ type: 'text', text: t }));
 
-    try {
-      await lineClient.replyMessage({ replyToken, messages });
-      console.log('[codespace] replied via reply API');
-    } catch (replyErr) {
-      console.warn('[codespace] reply failed, fallback to push:', replyErr.message);
+    // 按順序嘗試所有 reply tokens（第一個最早過期，優先使用）
+    let replied = false;
+    for (const token of allReplyTokens) {
+      try {
+        await lineClient.replyMessage({ replyToken: token, messages });
+        console.log(`[codespace] replied via reply API (token: ${token.slice(0, 8)}...)`);
+        replied = true;
+        break;
+      } catch (err) {
+        console.warn(`[codespace] reply token failed: ${err.message}, trying next...`);
+      }
+    }
+    if (!replied) {
       try {
         await lineClient.pushMessage({ to: userId, messages });
-        console.log('[codespace] replied via push API');
+        console.log('[codespace] replied via push API (all reply tokens exhausted)');
       } catch (pushErr) {
         console.error('[codespace] push failed:', pushErr.message);
       }
