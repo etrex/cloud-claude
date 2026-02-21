@@ -62,8 +62,9 @@ fi
 # 呼叫 claude，有 session 就 resume，失敗則建新 session
 if [ -n "$SESSION_ID" ]; then
   OUTPUT=$("$CLAUDE" -p "$PROMPT" --resume "$SESSION_ID" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>/dev/null)
-  # resume 失敗（輸出空）則清掉舊 session，重新開始
-  if [ -z "$OUTPUT" ]; then
+  # resume 失敗（輸出空或 is_error: true）則清掉舊 session，重新開始
+  IS_ERROR=$(echo "$OUTPUT" | jq -r '.is_error // false' 2>/dev/null)
+  if [ -z "$OUTPUT" ] || [ "$IS_ERROR" = "true" ]; then
     SESSION_ID=""
     OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>/dev/null)
   fi
