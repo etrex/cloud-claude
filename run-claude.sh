@@ -51,6 +51,15 @@ if [ -f "$SESSIONS_FILE" ]; then
   SESSION_ID=$(jq -r --arg uid "$USER_ID" '.[$uid] // empty' "$SESSIONS_FILE" 2>/dev/null)
 fi
 
+# 若使用者傳送 reset，清除 session 並回覆確認
+if [ "$TEXT" = "reset" ]; then
+  if [ -f "$SESSIONS_FILE" ] && [ -n "$SESSION_ID" ]; then
+    jq --arg uid "$USER_ID" 'del(.[$uid])' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
+  fi
+  echo "已重置對話記憶，下一則訊息將開始全新對話。"
+  exit 0
+fi
+
 SYSTEM_PROMPT="你是一個 LINE Bot 助手。請用純文字回覆，不要使用任何 Markdown 語法（不要用 **粗體**、## 標題、\`程式碼\`、--- 分隔線等）。回覆要簡潔易讀。"
 
 # 根據是否在白名單決定是否加上 --dangerously-skip-permissions
