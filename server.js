@@ -78,6 +78,15 @@ function enqueueEvent(event) {
   const src = event.source;
   const chatId = src.groupId || src.roomId || src.userId;
 
+  // where/here 指令：直接回覆 chatId，不進佇列、不呼叫 Claude
+  if (msgType === 'text' && ['where', 'here'].includes(event.message.text.trim()) && event.replyToken) {
+    lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `Chat ID: ${chatId}` }],
+    }).catch(() => {});
+    return;
+  }
+
   if (!messageBuffers.has(chatId)) {
     messageBuffers.set(chatId, { events: [], timer: null });
   }
@@ -162,17 +171,6 @@ function runOnCodespace(events) {
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const workDir = getWorkDir(firstEvent);
   if (!workDir) {
-    const hereEvent = events.find(e =>
-      e.message.type === 'text' && ['where', 'here'].includes(e.message.text.trim())
-    );
-    if (hereEvent && hereEvent.replyToken) {
-      lineClient.replyMessage({
-        replyToken: hereEvent.replyToken,
-        messages: [{ type: 'text', text: `Chat ID: ${chatId}` }],
-      }).catch(() => {});
-      return;
-    }
-
     const sourceType = firstEvent.source.type;
     if (sourceType === 'user') {
       // 私訊：直接回覆罐頭訊息
