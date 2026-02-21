@@ -45,10 +45,29 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 const messageBuffers = new Map();
 const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '3000', 10);
 
+// 已見過的 messageId，防止 LINE 重送時重複處理
+const seenMessageIds = new Map(); // messageId -> timestamp
+const SEEN_TTL_MS = 5 * 60 * 1000; // 5 分鐘後清除
+
 function enqueueEvent(event) {
   if (event.type !== 'message') return;
   const msgType = event.message.type;
   if (msgType !== 'text' && msgType !== 'image') return;
+
+  const messageId = event.message.id;
+
+  // 忽略已見過的 messageId（防止 LINE 重送重複處理）
+  if (seenMessageIds.has(messageId)) {
+    console.log(`[debounce] duplicate messageId=${messageId}, ignoring`);
+    return;
+  }
+  seenMessageIds.set(messageId, Date.now());
+
+  // 清除過期的 messageId 紀錄
+  const now = Date.now();
+  for (const [id, ts] of seenMessageIds) {
+    if (now - ts > SEEN_TTL_MS) seenMessageIds.delete(id);
+  }
 
   const src = event.source;
   const chatId = src.groupId || src.roomId || src.userId;
