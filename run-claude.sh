@@ -62,14 +62,23 @@ fi
 # 呼叫 claude，有 session 就 resume，失敗則建新 session
 if [ -n "$SESSION_ID" ]; then
   OUTPUT=$("$CLAUDE" -p "$PROMPT" --resume "$SESSION_ID" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>/dev/null)
-  # resume 失敗（輸出空或 is_error: true）則清掉舊 session，重新開始
-  IS_ERROR=$(echo "$OUTPUT" | jq -r '.is_error // false' 2>/dev/null)
-  if [ -z "$OUTPUT" ] || [ "$IS_ERROR" = "true" ]; then
+  # resume 失敗（輸出空）則清掉舊 session，重新開始
+  if [ -z "$OUTPUT" ]; then
     SESSION_ID=""
     OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>/dev/null)
   fi
 else
   OUTPUT=$("$CLAUDE" -p "$PROMPT" --output-format json --system-prompt "$SYSTEM_PROMPT" $EXTRA_FLAGS 2>/dev/null)
+fi
+
+# 若有錯誤，保留 session 不動，直接輸出 debug 訊息給用戶
+IS_ERROR=$(echo "$OUTPUT" | jq -r '.is_error // false' 2>/dev/null)
+if [ "$IS_ERROR" = "true" ]; then
+  ERROR_RESULT=$(echo "$OUTPUT" | jq -r '.result // "unknown error"' 2>/dev/null)
+  REQUEST_ID=$(echo "$OUTPUT" | jq -r '.usage | .. | strings | select(startswith("req_"))' 2>/dev/null || echo "")
+  echo "[ERROR] session=$SESSION_ID msg=$MESSAGE_ID type=$MSG_TYPE
+$ERROR_RESULT"
+  exit 0
 fi
 
 # 儲存新的 session ID
