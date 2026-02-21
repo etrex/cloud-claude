@@ -14,6 +14,12 @@ const lineClient = new messagingApi.MessagingApiClient({
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
 });
 
+let botUserId = null;
+lineClient.getBotInfo().then(info => {
+  botUserId = info.userId;
+  console.log(`Bot userId: ${botUserId}`);
+}).catch(err => console.error('getBotInfo failed:', err.message));
+
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'cloud-claude-line-bot' });
 });
@@ -164,8 +170,31 @@ function runOnCodespace(events) {
         replyToken: hereEvent.replyToken,
         messages: [{ type: 'text', text: `Chat ID: ${chatId}` }],
       }).catch(() => {});
+      return;
+    }
+
+    const sourceType = firstEvent.source.type;
+    if (sourceType === 'user') {
+      // 私訊：直接回覆罐頭訊息
+      const replyEvent = events.find(e => e.replyToken);
+      if (replyEvent) {
+        lineClient.replyMessage({
+          replyToken: replyEvent.replyToken,
+          messages: [{ type: 'text', text: '你目前不在白名單內，無法使用此服務。' }],
+        }).catch(() => {});
+      }
     } else {
-      console.log(`[codespace] chatId=${chatId} not in projectMap, dropping`);
+      // 群組：只有 mention bot 才回覆罐頭訊息
+      const mentionEvent = events.find(e =>
+        e.message.type === 'text' &&
+        e.message.mention?.mentionees?.some(m => m.type === 'user' && m.userId === botUserId)
+      );
+      if (mentionEvent && mentionEvent.replyToken) {
+        lineClient.replyMessage({
+          replyToken: mentionEvent.replyToken,
+          messages: [{ type: 'text', text: '你目前不在白名單內，無法使用此服務。' }],
+        }).catch(() => {});
+      }
     }
     return;
   }
