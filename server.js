@@ -37,9 +37,68 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   res.status(200).json({ received: body.events.length });
 
   body.events.forEach((event) => {
-    runOnCodespace(event);
+    enqueueEvent(event);
   });
 });
+
+// 訊息緩衝區：chatId -> { events: [], timer: null }
+const messageBuffers = new Map();
+const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '3000', 10);
+
+function enqueueEvent(event) {
+  if (event.type !== 'message') return;
+  const msgType = event.message.type;
+  if (msgType !== 'text' && msgType !== 'image') return;
+
+  const src = event.source;
+  const chatId = src.groupId || src.roomId || src.userId;
+
+  if (!messageBuffers.has(chatId)) {
+    messageBuffers.set(chatId, { events: [], timer: null });
+  }
+
+  const buffer = messageBuffers.get(chatId);
+  buffer.events.push(event);
+  console.log(`[debounce] chatId=${chatId} buffered ${buffer.events.length} event(s)`);
+
+  if (buffer.timer) clearTimeout(buffer.timer);
+  buffer.timer = setTimeout(() => {
+    const events = buffer.events;
+    messageBuffers.delete(chatId);
+    flushBuffer(chatId, events);
+  }, DEBOUNCE_MS);
+}
+
+function flushBuffer(chatId, events) {
+  if (events.length === 0) return;
+  console.log(`[debounce] chatId=${chatId} flushing ${events.length} event(s)`);
+
+  // 取最後一個 event 作為主事件（使用其 replyToken）
+  const lastEvent = events[events.length - 1];
+
+  // 合併所有文字訊息
+  const combinedText = events
+    .filter(e => e.message.type === 'text')
+    .map(e => e.message.text)
+    .join('\n');
+
+  // 若有圖片，以第一張圖片為主
+  const imageEvent = events.find(e => e.message.type === 'image');
+  const primaryMsgType = imageEvent ? 'image' : 'text';
+  const primaryMessageId = imageEvent ? imageEvent.message.id : lastEvent.message.id;
+
+  const mergedEvent = {
+    ...lastEvent,
+    message: {
+      ...lastEvent.message,
+      type: primaryMsgType,
+      id: primaryMessageId,
+      text: combinedText,
+    },
+  };
+
+  runOnCodespace(mergedEvent);
+}
 
 function shellEscape(str) {
   return "'" + str.replace(/'/g, "'\\''") + "'";
