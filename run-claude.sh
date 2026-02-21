@@ -177,6 +177,11 @@ def call_api(url, body):
         log(f"FAIL {url}: {e}")
         return False
 
+def prepend(label, msgs):
+    result = [dict(m) for m in msgs]
+    result[0]["text"] = f"[{label}] " + result[0]["text"]
+    return result
+
 def pop_token(path):
     """讀取並刪除檔案第一行，回傳該行內容；無內容則回傳 None"""
     try:
@@ -199,13 +204,13 @@ while not replied:
         break
     replied = call_api(
         "https://api.line.me/v2/bot/message/reply",
-        {"replyToken": reply_token, "messages": messages}
+        {"replyToken": reply_token, "messages": prepend("reply", messages)}
     )
 
 if not replied:
     call_api(
         "https://api.line.me/v2/bot/message/push",
-        {"to": chat_id, "messages": messages}
+        {"to": chat_id, "messages": prepend("push", messages)}
     )
 PYEOF
 ) &
