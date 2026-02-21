@@ -54,12 +54,22 @@ if [ -f "$SESSIONS_FILE" ]; then
   SESSION_ID=$(jq -r --arg uid "$USER_ID" '.[$uid] // empty' "$SESSIONS_FILE" 2>/dev/null)
 fi
 
-# 若使用者傳送 reset，清除 session 並立即回覆（不進佇列）
+# 若使用者傳送 reset，清除 session 並直接用 replyToken 回覆（不進佇列）
 if [ "$TEXT" = "reset" ]; then
   if [ -f "$SESSIONS_FILE" ] && [ -n "$SESSION_ID" ]; then
     jq --arg uid "$USER_ID" 'del(.[$uid])' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
   fi
-  echo "已重置對話記憶，下一則訊息將開始全新對話。"
+  if [ -n "$REPLY_TOKEN" ]; then
+    curl -s -X POST https://api.line.me/v2/bot/message/reply \
+      -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"replyToken\":\"$REPLY_TOKEN\",\"messages\":[{\"type\":\"text\",\"text\":\"已重置對話記憶，下一則訊息將開始全新對話。\"}]}"
+  else
+    curl -s -X POST https://api.line.me/v2/bot/message/push \
+      -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"to\":\"$CHAT_ID\",\"messages\":[{\"type\":\"text\",\"text\":\"已重置對話記憶，下一則訊息將開始全新對話。\"}]}"
+  fi
   exit 0
 fi
 
