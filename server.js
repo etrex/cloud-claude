@@ -156,7 +156,17 @@ function runOnCodespace(events) {
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const workDir = getWorkDir(firstEvent);
   if (!workDir) {
-    console.log(`[codespace] chatId=${chatId} not in projectMap, dropping`);
+    const hereEvent = events.find(e =>
+      e.message.type === 'text' && ['where', 'here'].includes(e.message.text.trim())
+    );
+    if (hereEvent && hereEvent.replyToken) {
+      lineClient.replyMessage({
+        replyToken: hereEvent.replyToken,
+        messages: [{ type: 'text', text: `Chat ID: ${chatId}` }],
+      }).catch(() => {});
+    } else {
+      console.log(`[codespace] chatId=${chatId} not in projectMap, dropping`);
+    }
     return;
   }
 
