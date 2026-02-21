@@ -73,27 +73,34 @@ function flushBuffer(chatId, events) {
   if (events.length === 0) return;
   console.log(`[debounce] chatId=${chatId} flushing ${events.length} event(s)`);
 
-  // 取最後一個 event 作為主事件（使用其 replyToken）
-  const lastEvent = events[events.length - 1];
+  // 按順序保存所有 reply tokens（第一個最早過期，優先使用）
+  const allReplyTokens = events.map(e => e.replyToken).filter(Boolean);
+  console.log(`[debounce] collected ${allReplyTokens.length} reply token(s)`);
 
-  // 合併所有文字訊息
+  // 以第一個 event 為基礎（其 reply token 最早過期，應優先使用）
+  const firstEvent = events[0];
+
+  // 完整合併所有文字訊息（按傳送順序）
   const combinedText = events
     .filter(e => e.message.type === 'text')
     .map(e => e.message.text)
     .join('\n');
 
-  // 若有圖片，以第一張圖片為主
+  // 圖片：依傳送順序取第一張
   const imageEvent = events.find(e => e.message.type === 'image');
   const primaryMsgType = imageEvent ? 'image' : 'text';
-  const primaryMessageId = imageEvent ? imageEvent.message.id : lastEvent.message.id;
+  const primaryMessageId = imageEvent ? imageEvent.message.id : firstEvent.message.id;
 
   const mergedEvent = {
-    ...lastEvent,
+    ...firstEvent,
+    replyToken: allReplyTokens[0],
+    _allReplyTokens: allReplyTokens,
     message: {
-      ...lastEvent.message,
+      ...firstEvent.message,
       type: primaryMsgType,
       id: primaryMessageId,
       text: combinedText,
+      quotedMessageId: firstEvent.message.quotedMessageId || '',
     },
   };
 
@@ -122,7 +129,7 @@ function runOnCodespace(event) {
   if (msgType !== 'text' && msgType !== 'image') return;
 
   const userId = event.source.userId;
-  const replyToken = event.replyToken;
+  const allReplyTokens = event._allReplyTokens || [event.replyToken].filter(Boolean);
   const messageId = event.message.id;
   const text = msgType === 'text' ? event.message.text : '';
   const quotedMessageId = event.message.quotedMessageId || '';
@@ -149,11 +156,12 @@ function runOnCodespace(event) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const firstReplyToken = allReplyTokens[0] || '';
   const child = spawn('gh', [
     'codespace', 'ssh',
     '-c', codespaceName,
     '--',
-    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(replyToken)}`,
+    `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(firstReplyToken)}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stdout = '';
@@ -188,14 +196,22 @@ function runOnCodespace(event) {
     }
     const messages = (chunks.length > 0 ? chunks : ['（無回應）']).map(t => ({ type: 'text', text: t }));
 
-    try {
-      await lineClient.replyMessage({ replyToken, messages });
-      console.log('[codespace] replied via reply API');
-    } catch (replyErr) {
-      console.warn('[codespace] reply failed, fallback to push:', replyErr.message);
+    // 按順序嘗試所有 reply tokens（第一個最早過期，優先使用）
+    let replied = false;
+    for (const token of allReplyTokens) {
+      try {
+        await lineClient.replyMessage({ replyToken: token, messages });
+        console.log(`[codespace] replied via reply API (token: ${token.slice(0, 8)}...)`);
+        replied = true;
+        break;
+      } catch (err) {
+        console.warn(`[codespace] reply token failed: ${err.message}, trying next...`);
+      }
+    }
+    if (!replied) {
       try {
         await lineClient.pushMessage({ to: userId, messages });
-        console.log('[codespace] replied via push API');
+        console.log('[codespace] replied via push API (all reply tokens exhausted)');
       } catch (pushErr) {
         console.error('[codespace] push failed:', pushErr.message);
       }
