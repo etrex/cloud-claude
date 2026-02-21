@@ -21,6 +21,7 @@ CloudClaude 透過通訊軟體作為介面，讓你在任何設備上都能延�
 - 操作 git（commit、push、pull 等）
 - 存取雲端 VM 上的完整開發環境
 - **切換設備時對話不中斷**
+- 建立 GitHub Issue 與 Pull Request
 
 ## 架構
 
@@ -41,4 +42,4 @@ CloudClaude 透過通訊軟體作為介面，讓你在任何設備上都能延�
 
 MIT
 
-<!-- updated: 2026-02-20 -->
+<!-- updated: 2026-02-21 -->
