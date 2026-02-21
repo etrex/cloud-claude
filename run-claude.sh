@@ -8,8 +8,9 @@ ALLOW_WRITE="$5"
 MSG_TYPE="${6:-text}"
 CHAT_ID="${7:-$USER_ID}"
 REPLY_TOKEN="$8"
+WORK_DIR="${9:-/workspaces/cloud-claude}"
 
-SESSIONS_FILE="/workspaces/cloud-claude/.sessions.json"
+SESSIONS_FILE="$WORK_DIR/.sessions.json"
 CLAUDE="/home/codespace/nvm/current/bin/claude"
 
 # 載入 Codespace secrets（非 login shell 不會自動注入）
@@ -22,7 +23,7 @@ if [ -f "$SECRETS_FILE" ]; then
   done < "$SECRETS_FILE"
 fi
 
-cd /workspaces/cloud-claude
+cd "$WORK_DIR"
 
 # 若為圖片，先下載到暫存檔
 IMAGE_PATH=""
@@ -144,11 +145,11 @@ $STDERR_OUTPUT}"
   fi
 
   # 回覆：先試 reply token queue，全部失敗才用 Push API
-  CLAUDE_RESPONSE="$RESPONSE" python3 - "$CHAT_ID" "$TOKEN_QUEUE_FILE" <<PYEOF
+  CLAUDE_RESPONSE="$RESPONSE" WORK_DIR="$WORK_DIR" python3 - "$CHAT_ID" "$TOKEN_QUEUE_FILE" <<PYEOF
 import sys, json, os, urllib.request
 from datetime import datetime
 
-LOG = "/workspaces/cloud-claude/processor.log"
+LOG = os.path.join(os.environ.get("WORK_DIR", "/workspaces/cloud-claude"), "processor.log")
 def log(msg):
     with open(LOG, "a") as f:
         f.write(f"[{datetime.now().isoformat()}] {msg}\n")

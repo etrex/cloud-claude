@@ -102,12 +102,24 @@ const allowedIds = new Set(
   (process.env.ALLOWED_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
 );
 
+const projectMap = new Map([
+  ['Caad35ad92eb67f8f62d3e70f78632a7c', '/workspaces/airport-gogo'],
+]);
+
 function isAllowed(event) {
   const src = event.source;
   if (src.groupId && allowedIds.has(src.groupId)) return true;
   if (src.roomId && allowedIds.has(src.roomId)) return true;
   if (src.userId && allowedIds.has(src.userId)) return true;
   return false;
+}
+
+function getWorkDir(event) {
+  const src = event.source;
+  for (const id of [src.groupId, src.roomId, src.userId]) {
+    if (id && projectMap.has(id)) return projectMap.get(id);
+  }
+  return '/workspaces/cloud-claude';
 }
 
 function runOnCodespace(events) {
@@ -141,6 +153,7 @@ function runOnCodespace(events) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const workDir = getWorkDir(firstEvent);
 
   // 每個 event 個別呼叫 run-claude.sh
   // run-claude.sh 內建 30 秒 sliding window 佇列，會自動合併所有訊息後統一呼叫 Claude
@@ -152,13 +165,13 @@ function runOnCodespace(events) {
     const quotedMessageId = event.message.quotedMessageId || '';
     const replyToken = event.replyToken || '';
 
-    console.log(`[codespace] enqueue msgType=${msgType} messageId=${messageId}`);
+    console.log(`[codespace] enqueue msgType=${msgType} messageId=${messageId} workDir=${workDir}`);
 
     const child = spawn('gh', [
       'codespace', 'ssh',
       '-c', codespaceName,
       '--',
-      `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(replyToken)}`,
+      `ANTHROPIC_API_KEY=${apiKey} /workspaces/cloud-claude/run-claude.sh ${shellEscape(userId)} ${shellEscape(messageId)} ${shellEscape(text)} ${shellEscape(quotedMessageId)} ${allowWrite} ${shellEscape(msgType)} ${shellEscape(chatId)} ${shellEscape(replyToken)} ${shellEscape(workDir)}`,
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stderr = '';
