@@ -104,6 +104,7 @@ const allowedIds = new Set(
 
 const projectMap = new Map([
   ['Caad35ad92eb67f8f62d3e70f78632a7c', '/workspaces/airport-gogo'],
+  ['Uefa877a60cb3ed8e0d28b1b6263f549e', '/workspaces/cloud-claude'],
 ]);
 
 function isAllowed(event) {
@@ -119,7 +120,7 @@ function getWorkDir(event) {
   for (const id of [src.groupId, src.roomId, src.userId]) {
     if (id && projectMap.has(id)) return projectMap.get(id);
   }
-  return '/workspaces/cloud-claude';
+  return null;
 }
 
 function runOnCodespace(events) {
@@ -154,6 +155,10 @@ function runOnCodespace(events) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const workDir = getWorkDir(firstEvent);
+  if (!workDir) {
+    console.log(`[codespace] chatId=${chatId} not in projectMap, dropping`);
+    return;
+  }
 
   // 每個 event 個別呼叫 run-claude.sh
   // run-claude.sh 內建 30 秒 sliding window 佇列，會自動合併所有訊息後統一呼叫 Claude
