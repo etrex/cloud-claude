@@ -114,7 +114,13 @@ function runOnCodespace(event) {
     const response = stdout.trim();
     console.log(`[codespace] response length: ${response.length}`);
 
-    const messages = [{ type: 'text', text: response || '（無回應）' }];
+    const chunks = [];
+    const CHUNK_SIZE = 2000;
+    const MAX_CHUNKS = 5;
+    for (let i = 0; i < response.length && chunks.length < MAX_CHUNKS; i += CHUNK_SIZE) {
+      chunks.push(response.slice(i, i + CHUNK_SIZE));
+    }
+    const messages = (chunks.length > 0 ? chunks : ['（無回應）']).map(t => ({ type: 'text', text: t }));
 
     try {
       await lineClient.replyMessage({ replyToken, messages });
